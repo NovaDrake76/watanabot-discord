@@ -1,0 +1,4 @@
+json
+nextcord
+flask
+requests
