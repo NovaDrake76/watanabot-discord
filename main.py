@@ -19,9 +19,12 @@ app = Flask(__name__)
 def load_subscriptions():
     try:
         with open('subscriptions.json', 'r') as file:
-            return json.load(file)
+            try:
+                return json.load(file)
+            except json.JSONDecodeError:
+                return {}  # Return an empty dict if JSON is invalid
     except FileNotFoundError:
-        return {}
+        return {}  # Return an empty dict if file does not exist
 
 # Save subscriptions to a file
 def save_subscriptions(subscriptions):
