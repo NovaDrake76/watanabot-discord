@@ -1,9 +1,9 @@
 import json
 import nextcord
-from nextcord.ext import commands, tasks
-from flask import Flask, request, jsonify
-import requests
-from threading import Thread
+from nextcord.ext import commands
+from quart import Quart, request, jsonify
+import aiohttp
+import asyncio
 import os
 
 # Discord bot setup
@@ -12,8 +12,12 @@ intents.messages = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Flask app setup
-app = Flask(__name__)
+# Flask app setup, using Quart for asyncio compatibility
+app = Quart(__name__)
+
+# Async HTTP session for making requests within async functions
+async def get_async_session():
+    return aiohttp.ClientSession()
 
 # Load or initialize subscriptions
 def load_subscriptions():
@@ -54,27 +58,30 @@ async def unsubscribe(ctx):
 
 async def post_image_to_subscribed_channels(s3_url, text):
     """Posts the image to all subscribed channels."""
+    async_session = await get_async_session()
     for channel_id in subscriptions:
         channel = bot.get_channel(int(channel_id))
         if channel:
-            await channel.send(content=text, file=nextcord.File(fp=requests.get(s3_url, stream=True).raw, filename="image.png"))
+            async with async_session.get(s3_url) as resp:
+                if resp.status == 200:
+                    data = await resp.read()
+                    await channel.send(content=text, file=nextcord.File(fp=data, filename="image.png"))
 
 @app.route('/notify', methods=['POST'])
-def notify():
+async def notify():
     """Receives notifications and triggers posting to subscribed channels."""
-    data = request.json
+    data = await request.json
     s3_url = data.get('s3_url')
     text = data.get('text')
-    bot.loop.create_task(post_image_to_subscribed_channels(s3_url, text))
+    asyncio.create_task(post_image_to_subscribed_channels(s3_url, text))
     return jsonify({"message": "Notification received"}), 200
 
-def run_bot():
-    bot.run(os.getenv('DISCORD_TOKEN'))
+async def run_bot():
+    await bot.start(os.getenv('DISCORD_TOKEN'))
+
+@app.before_serving
+async def startup():
+    asyncio.create_task(run_bot())
 
 if __name__ == '__main__':
-    # Run the bot in a separate thread
-    bot_thread = Thread(target=run_bot)
-    bot_thread.start()
-    
-    # Run the Flask app
     app.run(host='0.0.0.0', port=5000, use_reloader=False)
